@@ -234,6 +234,15 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
       const pdfBuffer = doc.output('arraybuffer');
 
       // Configure email transporter
+      console.log('SMTP Configuration:', {
+        host: process.env.SMTP_HOST,
+        port: process.env.SMTP_PORT,
+        user: process.env.SMTP_USER,
+        from: process.env.SMTP_FROM,
+        // Don't log the password for security
+        hasPassword: !!process.env.SMTP_PASS
+      });
+
       const transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST,
         port: process.env.SMTP_PORT,
@@ -241,7 +250,9 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
         auth: {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASS
-        }
+        },
+        debug: true, // Enable debug logs
+        logger: true  // Enable logger
       });
 
       // Verify SMTP connection configuration
