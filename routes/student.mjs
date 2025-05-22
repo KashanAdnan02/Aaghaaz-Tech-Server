@@ -197,16 +197,18 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
       const doc = new jsPDF('landscape');
 
       // Add front of card
-      doc.setFontSize(20);
-      doc.text('Student ID Card', 105, 20, { align: 'center' });
+      doc.setFontSize(24);
+      doc.setTextColor(0, 0, 128); // Navy blue color
+      doc.text('Aaghaaz Tech', 105, 20, { align: 'center' });
+      
+      doc.setFontSize(16);
+      doc.setTextColor(0, 0, 0); // Black color
+      doc.text('Student ID Card', 105, 30, { align: 'center' });
 
-      // Add student details
-      doc.setFontSize(12);
-      doc.text(`Name: ${student.firstName} ${student.lastName}`, 20, 40);
-      doc.text(`Roll ID: ${student.rollId}`, 20, 50);
-      doc.text(`CNIC: ${student.cnic}`, 20, 60);
-      doc.text(`Phone: ${student.phoneNumber}`, 20, 70);
-      doc.text(`Status: ${student.status}`, 20, 80);
+      // Add border
+      doc.setDrawColor(0, 0, 128); // Navy blue color
+      doc.setLineWidth(1);
+      doc.rect(10, 10, 277, 190);
 
       // Add profile picture if exists
       if (profilePictureUrl) {
@@ -214,11 +216,40 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
           const response = await fetch(profilePictureUrl);
           const arrayBuffer = await response.arrayBuffer();
           const base64Image = Buffer.from(arrayBuffer).toString('base64');
-          doc.addImage(`data:image/jpeg;base64,${base64Image}`, 'JPEG', 150, 30, 40, 40);
+          doc.addImage(`data:image/jpeg;base64,${base64Image}`, 'JPEG', 20, 40, 60, 60);
         } catch (error) {
           console.error('Error adding profile picture to PDF:', error);
         }
       }
+
+      // Add student details with better formatting
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0); // Black color
+      
+      // Left side details
+      doc.text(`Name: ${student.firstName} ${student.lastName}`, 20, 120);
+      doc.text(`Roll ID: ${student.rollId}`, 20, 130);
+      doc.text(`CNIC: ${student.cnic}`, 20, 140);
+      doc.text(`Phone: ${student.phoneNumber}`, 20, 150);
+      
+      // Right side details
+      doc.text(`Email: ${student.email}`, 150, 120);
+      doc.text(`Gender: ${student.gender}`, 150, 130);
+      doc.text(`Status: ${student.status}`, 150, 140);
+      doc.text(`Enrollment Date: ${new Date().toLocaleDateString()}`, 150, 150);
+
+      // Add guardian details
+      doc.setFontSize(11);
+      doc.text('Guardian Information:', 20, 170);
+      doc.text(`Name: ${student.guardianName}`, 20, 180);
+      doc.text(`Phone: ${student.guardianPhone}`, 20, 190);
+      doc.text(`Relation: ${student.guardianRelation}`, 150, 180);
+
+      // Add QR code for student ID
+      const qrCode = await import('qrcode');
+      const qrData = `Student ID: ${student.rollId}\nName: ${student.firstName} ${student.lastName}\nEmail: ${student.email}`;
+      const qrCodeDataUrl = await qrCode.toDataURL(qrData);
+      doc.addImage(qrCodeDataUrl, 'PNG', 200, 40, 40, 40);
 
       // Generate PDF buffer
       const pdfBuffer = doc.output('arraybuffer');
