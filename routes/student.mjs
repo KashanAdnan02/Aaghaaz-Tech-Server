@@ -11,8 +11,6 @@ import Course from '../models/Course.mjs';
 import fs from 'fs';
 import path from 'path';
 const { jsPDF } = await import('jspdf');
-import fs from 'fs';
-import path from 'path';
 const router = express.Router();
 
 // Configure multer for memory storage
