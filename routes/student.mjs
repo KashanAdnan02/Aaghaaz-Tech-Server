@@ -12,6 +12,8 @@ import fs from 'fs';
 import path from 'path';
 const { jsPDF } = await import('jspdf');
 import dotenv from 'dotenv';
+import winston from 'winston';
+import QRCode from 'qrcode';
 dotenv.config();
 const router = express.Router();
 
@@ -62,6 +64,30 @@ const uploadToCloudinary = async (file) => {
   }
 };
 
+// Helper function to compress image
+const compressImage = async (imageUrl) => {
+  try {
+    const response = await fetch(imageUrl);
+    const arrayBuffer = await response.arrayBuffer();
+    const base64Image = Buffer.from(arrayBuffer).toString('base64');
+
+    // Upload to Cloudinary with compression
+    const result = await cloudinary.uploader.upload(`data:image/jpeg;base64,${base64Image}`, {
+      folder: 'compressed_images',
+      resource_type: 'image',
+      transformation: [
+        { width: 300, height: 300, crop: 'fill' },
+        { quality: 'auto:low', fetch_format: 'auto' }
+      ]
+    });
+
+    return result.secure_url;
+  } catch (error) {
+    console.error('Error compressing image:', error);
+    return imageUrl; // Return original URL if compression fails
+  }
+};
+
 // Register new student (Admin or Maintenance Office only)
 router.post('/register', upload.single('profilePicture'), async (req, res) => {
   try {
@@ -83,7 +109,7 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
 
     // Parse address object if it's a string
     let parsedAddress = address;
-    console.log(parsedAddress);
+    // console.log(parsedAddress);
 
     if (typeof address === 'string') {
       try {
@@ -158,6 +184,12 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
       profilePictureUrl = await uploadToCloudinary(req.file);
     }
 
+    // Compress profile picture if exists
+    let compressedProfileUrl = profilePictureUrl;
+    if (profilePictureUrl) {
+      compressedProfileUrl = await compressImage(profilePictureUrl);
+    }
+
     // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
@@ -177,7 +209,7 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
       guardianPhone,
       guardianRelation,
       enrolledCourses: parsedCourses,
-      profilePicture: profilePictureUrl,
+      profilePicture: compressedProfileUrl,
       status: 'Pending'
     });
 
@@ -185,63 +217,96 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
 
     // Generate and send ID card
     try {
-      // Create PDF using jsPDF
+      // Create PDF using jsPDF with increased width
+      const doc = new jsPDF({
+        unit: 'pt',
+        format: [400, 900],
+        orientation: 'landscape'
+      });
 
-
-      // Load background images as base64
-      const cardFrontPath = path.resolve('public/idcard/card_front.jpg');
-      const cardBackPath = path.resolve('public/idcard/card_back.jpg');
-      const cardFrontBase64 = fs.readFileSync(cardFrontPath, { encoding: 'base64' });
-      const cardBackBase64 = fs.readFileSync(cardBackPath, { encoding: 'base64' });
-
-      const doc = new jsPDF('portrait', 'pt', [400, 600]); // Custom size for ID card
-
-      // --- PAGE 1: FRONT ---
-      doc.addImage(`data:image/jpeg;base64,${cardFrontBase64}`, 'JPEG', 0, 0, 400, 600);
-      // Profile picture (circle)
-      if (profilePictureUrl) {
-        try {
-          const response = await fetch(profilePictureUrl);
-          const arrayBuffer = await response.arrayBuffer();
-          const base64Image = Buffer.from(arrayBuffer).toString('base64');
-          // Place profile picture in the center circle (adjust x/y/size as needed)
-          doc.addImage(`data:image/jpeg;base64,${base64Image}`, 'JPEG', 120, 120, 160, 160, undefined, 'FAST');
-        } catch (error) {
-          console.error('Error adding profile picture to PDF:', error);
-        }
-      }
-      // Course name (bottom center)
+      // Title (centered)
       doc.setFont('helvetica', 'bold');
+      doc.setFontSize(32);
+      doc.setTextColor(0, 204, 204); // #00cccc
+      doc.text('Aaghaaz Tech', 450, 50, { align: 'center' });
       doc.setFontSize(20);
-      doc.setTextColor(0, 0, 0);
-      const courseName = student.enrolledCourses && student.enrolledCourses[0] && student.enrolledCourses[0].courseId && student.enrolledCourses[0].courseId.name ? student.enrolledCourses[0].courseId.name : '';
-      doc.text(courseName, 200, 420, { align: 'center' });
+      doc.text('Student ID Card', 450, 85, { align: 'center' });
 
-      // --- PAGE 2: BACK ---
-      doc.addPage();
-      doc.addImage(`data:image/jpeg;base64,${cardBackBase64}`, 'JPEG', 0, 0, 400, 600);
+      // Left section: Personal and Guardian Info
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(14);
+      let y = 140;
+      doc.text(`Name: ${student.firstName} ${student.lastName}`, 40, y);
+      y += 25;
+      doc.text(`Roll ID: ${student.rollId || 'N/A'}`, 40, y);
+      y += 25;
+      doc.text(`CNIC: ${student.cnic}`, 40, y);
+      y += 25;
+      doc.text(`Phone: ${student.phoneNumber}`, 40, y);
+      y += 35;
+      // Guardian Information heading in #00cccc
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(18);
+      doc.setTextColor(0, 204, 204);
+      doc.text('Guardian Information:', 40, y);
+      y += 25;
+      // Guardian info in black
+      doc.setFont('helvetica', 'normal');
       doc.setTextColor(0, 0, 0);
-      // Details (adjust y positions as needed to match template)
-      doc.text(`Name: ${student.firstName} ${student.lastName}`, 40, 90);
-      doc.text(`Father name: ${student.guardianName || ''}`, 40, 130);
-      doc.text(`CNIC: ${student.cnic}`, 40, 170);
-      doc.text(`Course: ${courseName}`, 40, 210);
-      // (No need to add the colored note or logo, as it's in the background image)
+      doc.text(`Name: ${student.guardianName || 'N/A'}`, 40, y);
+      y += 25;
+      doc.text(`Phone: ${student.guardianPhone || 'N/A'}`, 40, y);
 
-      // Generate PDF buffer
-      const pdfBuffer = doc.output('arraybuffer');
+      // Right section: Student info, Course, QR code
+      let rightY = 140;
+      const rightX = 350;
+      doc.text(`Email: ${student.email}`, rightX, rightY);
+      rightY += 25;
+      doc.text(`Gender: ${student.gender || 'N/A'}`, rightX, rightY);
+      rightY += 25;
+      doc.text(`Status: ${student.status}`, rightX, rightY);
+      rightY += 25;
+      const enrollmentDateRight = student.enrolledCourses && student.enrolledCourses[0]?.enrollmentDate ? new Date(student.enrolledCourses[0].enrollmentDate).toLocaleDateString() : 'N/A';
+      doc.text(`Enrollment Date: ${enrollmentDateRight}`, rightX, rightY);
+      rightY += 25;
+      doc.text(`Relation: ${student.guardianRelation || 'N/A'}`, rightX, rightY);
+      rightY += 25;
+      // Add Course
+      const courseName = student.enrolledCourses && student.enrolledCourses[0]?.courseId?.name ? student.enrolledCourses[0].courseId.name : 'N/A';
+      doc.text(`Course: ${courseName}`, rightX, rightY);
+
+      // Center the QR code vertically in the right section
+      const qrSectionTop = 140;
+      const qrSectionHeight = 200;
+      const qrCodeSize = 120;
+      const qrCodeY = qrSectionTop + (qrSectionHeight - qrCodeSize) / 2;
+      try {
+        const qrData = student._id && student.email ? `${student._id}|${student.email}` : 'AaghaazTech';
+        const qrCodeDataUrl = await QRCode.toDataURL(qrData, {
+          width: qrCodeSize,
+          margin: 1,
+          color: {
+            dark: '#000000',
+            light: '#ffffff'
+          }
+        });
+        doc.addImage(qrCodeDataUrl, 'PNG', 720, qrCodeY, qrCodeSize, qrCodeSize);
+      } catch (error) {
+        console.error('Error generating QR code:', error);
+      }
+
+      // Generate PDF buffer (no compression)
+      const idCardPdfBuffer = doc.output('arraybuffer');
 
       // Configure email transporter
-      console.log('SMTP Configuration:', {
-        host: process.env.SMTP_HOST,
-        port: process.env.SMTP_PORT,
-        user: process.env.SMTP_USER,
-        from: process.env.SMTP_FROM,
-        // Don't log the password for security
-        hasPassword: !!process.env.SMTP_PASS
-      });
+      // console.log('SMTP Configuration:', {
+      //   host: process.env.SMTP_HOST,
+      //   port: process.env.SMTP_PORT,
+      //   user: process.env.SMTP_USER,
+      //   from: process.env.SMTP_FROM,
+      //   // Don't log the password for security
+      //   hasPassword: !!process.env.SMTP_PASS
+      // });
 
       const transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST,
@@ -251,20 +316,20 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASS
         },
-        debug: true, // Enable debug logs
-        logger: true  // Enable logger
+        debug: false, // Disable debug logs
+        logger: false  // Disable logger
       });
 
       // Verify SMTP connection configuration
       try {
         await transporter.verify();
-        console.log('SMTP connection verified successfully');
+        // console.log('SMTP connection verified successfully');
       } catch (error) {
         console.error('SMTP connection verification failed:', error);
         throw new Error(`SMTP configuration error: ${error.message}`);
       }
 
-      // Send email with PDF attachment
+      // Send email with PDF (no compression)
       try {
         await transporter.sendMail({
           from: process.env.SMTP_FROM,
@@ -273,10 +338,11 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
           text: `Dear ${student.firstName},\n\nWelcome to Aaghaaz Tech! Your registration has been received and is pending approval.\n\nPlease find your student ID card attached. You will need this ID card for attendance and other purposes.\n\nBest regards,\nAaghaaz Tech Team`,
           attachments: [{
             filename: 'student_id_card.pdf',
-            content: Buffer.from(pdfBuffer)
+            content: Buffer.from(idCardPdfBuffer),
+            contentType: 'application/pdf'
           }]
         });
-        console.log('Email sent successfully to:', student.email);
+        // console.log('Email sent successfully to:', student.email);
       } catch (error) {
         console.error('Error sending email:', error);
         throw new Error(`Failed to send email: ${error.message}`);
@@ -868,5 +934,11 @@ router.get('/export/csv', async (req, res) => {
     });
   }
 });
+
+const logger = winston.createLogger({
+  level: 'info', // or 'warn', 'error'
+  // ...other config
+});
+logger.info('Something happened');
 
 export default router; 
