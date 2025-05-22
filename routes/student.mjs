@@ -11,6 +11,8 @@ import Course from '../models/Course.mjs';
 import fs from 'fs';
 import path from 'path';
 const { jsPDF } = await import('jspdf');
+import dotenv from 'dotenv';
+dotenv.config();
 const router = express.Router();
 
 // Configure multer for memory storage
@@ -242,17 +244,32 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
         }
       });
 
+      // Verify SMTP connection configuration
+      try {
+        await transporter.verify();
+        console.log('SMTP connection verified successfully');
+      } catch (error) {
+        console.error('SMTP connection verification failed:', error);
+        throw new Error(`SMTP configuration error: ${error.message}`);
+      }
+
       // Send email with PDF attachment
-      await transporter.sendMail({
-        from: process.env.SMTP_FROM,
-        to: student.email,
-        subject: 'Welcome to Aaghaaz Tech - Your Student ID Card',
-        text: `Dear ${student.firstName},\n\nWelcome to Aaghaaz Tech! Your registration has been received and is pending approval.\n\nPlease find your student ID card attached. You will need this ID card for attendance and other purposes.\n\nBest regards,\nAaghaaz Tech Team`,
-        attachments: [{
-          filename: 'student_id_card.pdf',
-          content: Buffer.from(pdfBuffer)
-        }]
-      });
+      try {
+        await transporter.sendMail({
+          from: process.env.SMTP_FROM,
+          to: student.email,
+          subject: 'Welcome to Aaghaaz Tech - Your Student ID Card',
+          text: `Dear ${student.firstName},\n\nWelcome to Aaghaaz Tech! Your registration has been received and is pending approval.\n\nPlease find your student ID card attached. You will need this ID card for attendance and other purposes.\n\nBest regards,\nAaghaaz Tech Team`,
+          attachments: [{
+            filename: 'student_id_card.pdf',
+            content: Buffer.from(pdfBuffer)
+          }]
+        });
+        console.log('Email sent successfully to:', student.email);
+      } catch (error) {
+        console.error('Error sending email:', error);
+        throw new Error(`Failed to send email: ${error.message}`);
+      }
     } catch (error) {
       console.error('Error generating/sending ID card:', error);
       // Don't fail the registration if ID card generation fails
