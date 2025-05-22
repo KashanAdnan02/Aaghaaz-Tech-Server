@@ -8,7 +8,11 @@ import multer from 'multer';
 import nodemailer from 'nodemailer';
 import mongoose from 'mongoose';
 import Course from '../models/Course.mjs';
-
+import fs from 'fs';
+import path from 'path';
+const { jsPDF } = await import('jspdf');
+import fs from 'fs';
+import path from 'path';
 const router = express.Router();
 
 // Configure multer for memory storage
@@ -181,6 +185,54 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
 
     // Generate and send ID card
     try {
+      // Create PDF using jsPDF
+
+
+      // Load background images as base64
+      const cardFrontPath = path.resolve('public/idcard/card_front.jpg');
+      const cardBackPath = path.resolve('public/idcard/card_back.jpg');
+      const cardFrontBase64 = fs.readFileSync(cardFrontPath, { encoding: 'base64' });
+      const cardBackBase64 = fs.readFileSync(cardBackPath, { encoding: 'base64' });
+
+      const doc = new jsPDF('portrait', 'pt', [400, 600]); // Custom size for ID card
+
+      // --- PAGE 1: FRONT ---
+      doc.addImage(`data:image/jpeg;base64,${cardFrontBase64}`, 'JPEG', 0, 0, 400, 600);
+      // Profile picture (circle)
+      if (profilePictureUrl) {
+        try {
+          const response = await fetch(profilePictureUrl);
+          const arrayBuffer = await response.arrayBuffer();
+          const base64Image = Buffer.from(arrayBuffer).toString('base64');
+          // Place profile picture in the center circle (adjust x/y/size as needed)
+          doc.addImage(`data:image/jpeg;base64,${base64Image}`, 'JPEG', 120, 120, 160, 160, undefined, 'FAST');
+        } catch (error) {
+          console.error('Error adding profile picture to PDF:', error);
+        }
+      }
+      // Course name (bottom center)
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(20);
+      doc.setTextColor(0, 0, 0);
+      const courseName = student.enrolledCourses && student.enrolledCourses[0] && student.enrolledCourses[0].courseId && student.enrolledCourses[0].courseId.name ? student.enrolledCourses[0].courseId.name : '';
+      doc.text(courseName, 200, 420, { align: 'center' });
+
+      // --- PAGE 2: BACK ---
+      doc.addPage();
+      doc.addImage(`data:image/jpeg;base64,${cardBackBase64}`, 'JPEG', 0, 0, 400, 600);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(18);
+      doc.setTextColor(0, 0, 0);
+      // Details (adjust y positions as needed to match template)
+      doc.text(`Name: ${student.firstName} ${student.lastName}`, 40, 90);
+      doc.text(`Father name: ${student.guardianName || ''}`, 40, 130);
+      doc.text(`CNIC: ${student.cnic}`, 40, 170);
+      doc.text(`Course: ${courseName}`, 40, 210);
+      // (No need to add the colored note or logo, as it's in the background image)
+
+      // Generate PDF buffer
+      const pdfBuffer = doc.output('arraybuffer');
+
       // Configure email transporter
       const transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST,
@@ -191,68 +243,6 @@ router.post('/register', upload.single('profilePicture'), async (req, res) => {
           pass: process.env.SMTP_PASS
         }
       });
-
-      // Create PDF using jsPDF
-      const { jsPDF } = await import('jspdf');
-      const doc = new jsPDF('landscape');
-
-      // Add front of card
-      doc.setFontSize(24);
-      doc.setTextColor(0, 0, 128); // Navy blue color
-      doc.text('Aaghaaz Tech', 105, 20, { align: 'center' });
-      
-      doc.setFontSize(16);
-      doc.setTextColor(0, 0, 0); // Black color
-      doc.text('Student ID Card', 105, 30, { align: 'center' });
-
-      // Add border
-      doc.setDrawColor(0, 0, 128); // Navy blue color
-      doc.setLineWidth(1);
-      doc.rect(10, 10, 277, 190);
-
-      // Add profile picture if exists
-      if (profilePictureUrl) {
-        try {
-          const response = await fetch(profilePictureUrl);
-          const arrayBuffer = await response.arrayBuffer();
-          const base64Image = Buffer.from(arrayBuffer).toString('base64');
-          doc.addImage(`data:image/jpeg;base64,${base64Image}`, 'JPEG', 20, 40, 60, 60);
-        } catch (error) {
-          console.error('Error adding profile picture to PDF:', error);
-        }
-      }
-
-      // Add student details with better formatting
-      doc.setFontSize(12);
-      doc.setTextColor(0, 0, 0); // Black color
-      
-      // Left side details
-      doc.text(`Name: ${student.firstName} ${student.lastName}`, 20, 120);
-      doc.text(`Roll ID: ${student.rollId}`, 20, 130);
-      doc.text(`CNIC: ${student.cnic}`, 20, 140);
-      doc.text(`Phone: ${student.phoneNumber}`, 20, 150);
-      
-      // Right side details
-      doc.text(`Email: ${student.email}`, 150, 120);
-      doc.text(`Gender: ${student.gender}`, 150, 130);
-      doc.text(`Status: ${student.status}`, 150, 140);
-      doc.text(`Enrollment Date: ${new Date().toLocaleDateString()}`, 150, 150);
-
-      // Add guardian details
-      doc.setFontSize(11);
-      doc.text('Guardian Information:', 20, 170);
-      doc.text(`Name: ${student.guardianName}`, 20, 180);
-      doc.text(`Phone: ${student.guardianPhone}`, 20, 190);
-      doc.text(`Relation: ${student.guardianRelation}`, 150, 180);
-
-      // Add QR code for student ID
-      const qrCode = await import('qrcode');
-      const qrData = `Student ID: ${student.rollId}\nName: ${student.firstName} ${student.lastName}\nEmail: ${student.email}`;
-      const qrCodeDataUrl = await qrCode.toDataURL(qrData);
-      doc.addImage(qrCodeDataUrl, 'PNG', 200, 40, 40, 40);
-
-      // Generate PDF buffer
-      const pdfBuffer = doc.output('arraybuffer');
 
       // Send email with PDF attachment
       await transporter.sendMail({
@@ -526,7 +516,7 @@ router.get('/course/:courseId', async (req, res) => {
       'enrolledCourses.courseId': req.params.courseId,
       'enrolledCourses.status': 'Active'
     }).select('-password');
-    
+
     if (!students) {
       return res.status(404).json({ message: 'No students found for this course' });
     }
